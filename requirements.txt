@@ -27,6 +27,7 @@ pycolmap
 gdown
 nvitop
 h5py
+diffusers==0.36.0
 
 
 # vggt
