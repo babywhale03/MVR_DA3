@@ -1,0 +1,184 @@
+stage_1:
+  model: da3
+  rae:
+    target: 
+    params:
+      encoder_cls: 
+      encoder_config_path: 
+      encoder_input_size: 
+      encoder_params: 
+      decoder_config_path: 
+      pretrained_decoder_path: 
+      noise_tau: 
+      reshape_to_2d: 
+      normalization_stat_path: 
+  da3:
+    ckpt: depth-anything/DA3-GIANT-1.1
+  vggt:
+    ckpt: facebook/VGGT-1B
+
+
+stage_2:
+  model: DiTwDDTHeadMVRM
+  target: stage2.models.DDT_MVRM.DiTwDDTHeadMVRM
+  params:
+    input_size: [27, 36]  # feat_H, feat_W
+    patch_size: 1
+    in_channels: 1536
+    hidden_size: [1536, 3072]
+    depth: [28, 2]
+    num_heads: [16, 16]
+    mlp_ratio: 4.0
+    class_dropout_prob: 0.1
+    num_classes: 
+    use_qknorm: true 
+    use_swiglu: true
+    use_rope: true
+    use_rmsnorm: true
+    wo_shift: false
+    use_pos_embed: true
+  ckpt: result_train/stage2/260131/hypersim/TRAIN__fp32__hypersim__stage1-da3__stage2-DiTwDDTHeadMVRM__bs-64-accum-16__lr-2e-04__msg-lq-kernel50-fly__global17__re/checkpoints/ep-0080000.pt
+  # ckpt: result_train/stage2/260126/hypersim/TRAIN__fp32__hypersim__stage1-da3__stage2-DiTwDDTHeadMVRM__bs-2-accum-1__lr-2e-04__msg-lq-kernel50-fly__global17_ddp/checkpoints/ep-0060000.pt
+
+
+
+transport:
+  params:
+    path_type: 'Linear'
+    prediction: 'velocity'
+    loss_weight: null
+    time_dist_type: 'logit-normal_0_1'
+
+
+sampler:
+  mode: ODE
+  params:
+    sampling_method: 'euler'
+    num_steps: 50
+    atol: 1.0e-6
+    rtol: 1.0e-3
+    reverse: false
+
+
+guidance:
+  method: 'cfg'
+  scale: 1.0
+  t_min: 0.0
+  t_max: 1.0
+
+
+misc:
+  latent_size: [1, 973, 1536] # [v, n+1, d]
+  num_classes: 
+  time_dist_shift_dim: 1492992  # 1536*27*36
+  time_dist_shift_base: 4096
+
+
+training:
+  global_seed: 42
+  precision: fp32
+  epochs: 10
+  
+
+  # 공식: global_batch_size = tot_num_gpu * batch_per_gpu * grad_accum
+  # 만약 8대 gpu에서, gpu당 bs=2, grad_accum=4를 하고 싶으면
+  # 먼저 grad_accum_steps = 4 을 설정하고 
+  # global_batch_size = 8(tot_gpu_num) * 2(bs per gpu) * 4(grad_accum) = 64 로 설정하기
+
+
+  # global_batch_size: 64
+  # grad_accum_steps: 16
+  global_batch_size: 2
+  grad_accum_steps: 1
+  ema_decay: 0.9995
+  num_workers: 16
+  shuffle: True
+  log_interval: 1
+
+
+  ckpt_step_interval: 20000   # 20k
+
+  sample: True
+  sample_every: 2000  # 2k
+  
+
+  clip_grad: 1.0
+  optimizer:
+    lr: 2.0e-4
+    betas: [0.9, 0.95]
+    weight_decay: 0.0
+  scheduler:
+    type: linear
+    warmup_epochs: 5
+    decay_end_epoch: 10
+    base_lr: 2e-4
+    final_lr: 2e-5
+    warmup_from_zero: false
+
+
+log:
+  result_root_dir: result_train/stage2/260131
+  tracker:
+    name: wandb 
+    wandb:
+      key: e32eed0c2509bf898b850b0065ab62345005fb73
+      entity: jinlovespho
+      project: eccv26_mv_restoration
+      # msg: "lq-kernel50-fly__global17__re"
+      msg: "lq-kernel50-fly__global17__reTMP"
+
+
+data:
+  train:
+    image_size: 512 
+    num_input_view: 1
+    list: [hypersim]
+    # list: [hypersim, tartanair,]
+    hypersim:
+      ann_path: /mnt/dataset1/MV_Restoration/hypersim/metadata_images_split_scene_v1.csv
+      hq_root_path: /mnt/dataset1/MV_Restoration/hypersim/data
+      view_sel_strategy:
+    
+    tartanair:
+      ann_path: 
+      hq_root_path: /mnt/dataset1/MV_Restoration/tartanair/data
+      view_sel_strategy:
+
+  val:
+    image_size: 512 
+    num_input_view: 1
+    list: [hypersim]
+
+    hypersim:
+      num_eval_img: 30
+      ann_path: /mnt/dataset1/MV_Restoration/hypersim/metadata_images_split_scene_v1.csv
+      hq_root_path: /mnt/dataset1/MV_Restoration/hypersim/data
+      view_sel_strategy:
+    
+    tartanair:
+      num_eval_img: 
+      ann_path: 
+      hq_root_path: /mnt/dataset1/MV_Restoration/tartanair/data
+      view_sel_strategy:
+  
+
+mvrm:
+  
+  save_hq_latent: False
+  save_hq_latent_root_path:
+  # save_hq_latent_root_path: /mnt/dataset1/MV_Restoration/hypersim/da3_clean_latent/input_singleview_g17
+
+
+  # input_img: hq               # [hq, lq]
+  input_img: lq               # [hq, lq]
+
+  lq_latent_cond: addition    # [addition, concat]
+
+  train:
+    # DPT Head input feats = [19, 27, 33, 39]
+    extract_feat_layers: [17]
+    concat_feat: False
+  val:
+    restore_feat_layers: [17]
+    concat_feat: False 
+    

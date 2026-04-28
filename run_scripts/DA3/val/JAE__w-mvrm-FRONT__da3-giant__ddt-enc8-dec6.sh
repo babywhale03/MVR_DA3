@@ -1,0 +1,4 @@
+export PATH="$CONDA_PREFIX/bin:$PATH"
+export PYTHONBREAKPOINT=0
+
+time CUDA_VISIBLE_DEVICES=7 python -m depth_anything_3.bench.evaluator --config run_configs/DA3/val/JAE__w-mvrm-FRONT__da3-giant__ddt-enc8-dec6.yaml

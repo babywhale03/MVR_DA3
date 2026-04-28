@@ -1,0 +1,141 @@
+stage_1:
+  # select from [rae, da3, vggt]
+  model: rae
+  rae:
+    target: stage1.RAE
+    params:
+      encoder_cls: 'Dinov2withNorm'
+      encoder_config_path: 'facebook/dinov2-with-registers-base'
+      encoder_input_size: 448
+      encoder_params: {'dinov2_path': 'facebook/dinov2-with-registers-base', 'normalize': True}
+      decoder_config_path: 'RAE/configs/decoder/ViTXL'
+      pretrained_decoder_path: 'RAE/models/decoders/dinov2/wReg_base/ViTXL_n08_i512/model.pt'
+      noise_tau: 0.
+      reshape_to_2d: True
+      normalization_stat_path: 'RAE/models/stats/dinov2/wReg_base/imagenet1k_512/stat.pt'
+    
+  da3:
+    # ckpt: depth-anything/DA3NESTED-GIANT-LARGE
+    ckpt: depth-anything/DA3-GIANT-1.1
+    target:
+    params:
+  
+  vggt:
+    ckpt: facebook/VGGT-1B
+    target:
+    params:
+
+  
+stage_2:
+  target: stage2.models.DDT.DiTwDDTHead
+  params:
+    input_size: 32
+    patch_size: 1
+    in_channels: 768
+    hidden_size: [1152, 2048]
+    depth: [28, 2]
+    num_heads: [16, 16]
+    mlp_ratio: 4.0
+    class_dropout_prob: 0.1
+    num_classes: 1000
+    use_qknorm: false
+    use_swiglu: true
+    use_rope: true
+    use_rmsnorm: true
+    wo_shift: false
+    use_pos_embed: true
+  # ckpt: RAE/models/DiTs/Dinov2/wReg_base/ImageNet512/DiTDH-XL_ep400/stage2_model.pt
+
+transport:
+  params:
+    path_type: 'Linear'
+    prediction: 'velocity'
+    loss_weight: null
+    time_dist_type: 'logit-normal_0_1'
+
+sampler:
+  mode: ODE
+  params:
+    sampling_method: 'euler'
+    num_steps: 50
+    atol: 1.0e-6
+    rtol: 1.0e-3
+    reverse: false
+
+guidance:
+  method: 'cfg'
+  scale: 1.0
+  t_min: 0.0
+  t_max: 1.0
+
+misc:
+  latent_size: [768, 32, 32] # [C, H, W]
+  num_classes: 1000
+  time_dist_shift_dim: 786432 # 32*32*768
+  time_dist_shift_base: 4096
+
+
+
+training:
+  epochs: 1400
+  global_batch_size: 4
+  grad_accum_steps: 1 # change according to your GPU memory
+  ema_decay: 0.9995
+  num_workers: 8
+  log_interval: 100
+  checkpoint_interval: 1
+  sample_every: 1000
+  clip_grad: 1.0
+  global_seed: 42
+  optimizer:
+    lr: 2.0e-4
+    betas: [0.9, 0.95]
+    weight_decay: 0.0
+  scheduler:
+    type: linear
+    warmup_epochs: 40
+    decay_end_epoch: 800
+    base_lr: 2.0e-4
+    final_lr: 2.0e-5
+    warmup_from_zero: false
+
+
+# eval:
+#   eval_interval: 1 # Eval interval by optimization step
+#   eval_model: true # By default only evaluates EMA model. Set to true to eval non-EMA model as well.
+#   data_path: /media/data1/ImageNet2012/pho_val # path to ImageNet val images
+#   reference_npz_path: /media/data1/ImageNet2012/pho_val.npz # packed npz of ImageNet val images for FID calculation
+#   metrics: ['psnr', 'ssim', 'rfid'] # metrics to calculate
+
+
+
+
+log:
+  save_root_dir: result_train/RAE/imagenet512/stage2
+
+
+data:
+  train:
+    image_size: 512 
+    list: [imagenet]
+    # list: [hypersim, tartanair, ]
+
+    imagenet:
+      hq_path: /media/data1/ImageNet2012/train
+
+    hypersim:
+      hq_path: 
+      lq_path: /mnt/dataset1/MV_Restoration/hypersim/deg_blur/kernel50_intensity01
+      depth_path: 
+    
+    tartanair:
+      hq_path:
+      depth_path: 
+  val:
+    image_size: 512 
+    list: [eth3d]
+    eth3d:
+      hq_path:
+      depth_path: 
+  
+
