@@ -38,8 +38,10 @@ from depth_anything_3.utils.io.input_processor import InputProcessor
 from depth_anything_3.utils.io.output_processor import OutputProcessor
 from depth_anything_3.utils.logger import logger
 from depth_anything_3.utils.pose_align import align_poses_umeyama
+from depth_anything_3.utils.io.mvrm_rgb_frame_saver import save_mvrm_decoder_rgb_frames
 
 from torchvision.utils import save_image 
+import torchvision.transforms.functional as TF
 
 from mvr.utils.featsim_utils import *
 from mvr.utils.metric_utils import *
@@ -347,8 +349,7 @@ class DepthAnything3(nn.Module, PyTorchModelHubMixin):
             first_extract_layer_idx = cfg.mvrm.train.extract_feat_layers[0]
             lq_latent = lq_mvrm_out[('extract_feat', first_extract_layer_idx)]         # b v n+1 d
             lq_depth = lq_encoder_out.depth.unsqueeze(2)     # 1 v 1 h w
-
-
+        
 
 
 
@@ -1032,7 +1033,8 @@ class DepthAnything3(nn.Module, PyTorchModelHubMixin):
             print('WO_MVRM_VAE')
             print('-'*70)
             
-            export_feat_layers=[18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 39]
+            # export_feat_layers=[18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 39]
+            export_feat_layers=[24, 30, 36, 39]
             
             # (WO_MVRM_VAE) LQ FORWARD PASS
             print("LQ FORWARD PASS")
@@ -1111,6 +1113,9 @@ class DepthAnything3(nn.Module, PyTorchModelHubMixin):
                 with torch.autocast(device_type=imgs.device.type, dtype=autocast_dtype): 
                     restored_samples = eval_sampler(xt, denoiser.forward, **model_kwargs)[-1]     # b v n d
             print(f"Restored samples shape: {restored_samples.shape}")
+            
+            del xt, lq_latents, pure_noise
+            torch.cuda.empty_cache()
 
             with torch.no_grad():
                 if cfg.mvrm.lq_latent_cond == 'concat':
@@ -1132,25 +1137,55 @@ class DepthAnything3(nn.Module, PyTorchModelHubMixin):
                 decoded = self.vae.decode(restored_latent).sample  # (B*V, 3, H_img, W_img)
 
                 # convert to [0,1]
-                res_imgs = ((decoded + 1) / 2).clamp(0, 1)
+                res_imgs_decoded = ((decoded + 1) / 2).clamp(0, 1)
                 # reshape back
-                res_imgs = rearrange(res_imgs, '(b v) c h w -> b v c h w', b=B, v=V)
+                res_imgs = rearrange(res_imgs_decoded, '(b v) c h w -> b v c h w', b=B, v=V)
+                
+                del restored_latent, decoded
+                torch.cuda.empty_cache()
+
+                vis_rgb_recon_frame_root = os.path.join(cfg.workspace.work_dir, 'pho_rgb_recon_frame_results')
+                
+                for img_idx, img_id_full_path in enumerate(image.image_files):
+                    img_id_path = img_id_full_path.split('clean')[-1]
+                    rgb_res_save_path = vis_rgb_recon_frame_root + img_id_path
+                    img_folder = os.path.dirname(rgb_res_save_path)
+                    os.makedirs(img_folder, exist_ok=True)
+                    img = TF.to_pil_image(res_imgs_decoded[img_idx].cpu())
+                    img.save(rgb_res_save_path)
+
+                # vis_rgb_recon_frame_root = os.path.join(
+                #     cfg.workspace.work_dir,
+                #     'pho_rgb_recon_frame_results',
+                #     data,
+                #     pose_setting,
+                # )
+                # save_mvrm_decoder_rgb_frames(
+                #     rgb_hq=res_imgs,                 # (1, V, 3, H, W) or (V, 3, H, W)
+                #     rgb_lq=res_imgs,
+                #     rgb_res=res_imgs,
+                #     scene=scene,                  
+                #     image_files=image.image_files,
+                #     output_root=vis_rgb_recon_frame_root,
+                #     denorm_imagenet=False
+                # )
 
             print(f"Decoded image shape: {res_imgs.shape}")
-            processed_imgs = []
+            
+            device = imgs.device
+            res_imgs_np = (res_imgs.permute(0, 1, 3, 4, 2).detach().cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
+            resized_imgs = []
             for i in range(b):
-                view_imgs = []
                 for j in range(v):
-                    tmp_img = res_imgs[i, j].permute(1, 2, 0).detach().cpu().numpy()
-                    tmp_img = (tmp_img * 255.0).clip(0, 255).astype(np.uint8)
-                    tmp_img = self.resize(tmp_img)
-                    tmp_tensor = torch.from_numpy(tmp_img).permute(2, 0, 1).float() / 255.0
-                    view_imgs.append(tmp_tensor)
-                    
-                processed_imgs.append(torch.stack(view_imgs))
-
-            res_imgs = torch.stack(processed_imgs).to(imgs.device)
+                    resized_imgs.append(self.resize(res_imgs_np[i, j]))
+            
+            resized_imgs = np.stack(resized_imgs).reshape(b, v, resized_imgs[0].shape[0], resized_imgs[0].shape[1], 3)
+            res_imgs = torch.from_numpy(resized_imgs.transpose(0, 1, 4, 2, 3)).float() / 255.0
+            res_imgs = res_imgs.to(device)
             print(f"Resized decoded image shape: {res_imgs.shape}")
+            
+            del res_imgs_np, resized_imgs
+            torch.cuda.empty_cache()
 
             mean = torch.tensor([0.485, 0.456, 0.406], device=res_imgs.device).view(1, 1, 3, 1, 1)
             std = torch.tensor([0.229, 0.224, 0.225], device=res_imgs.device).view(1, 1, 3, 1, 1)
@@ -1203,6 +1238,11 @@ class DepthAnything3(nn.Module, PyTorchModelHubMixin):
             plot_cam_trajectory(hq_pred_pose[0], lq_pred_pose[0], res_pred_pose[0], visualize_direction=False, save_path=f"{cam_save_root}/{scene}.png")
             plot_cam_trajectory_fair(hq_pred_pose[0], lq_pred_pose[0], res_pred_pose[0], visualize_direction=False, save_path=f"{cam_save_root}/fair_{scene}.png")
 
+            del hq_encoder_out, lq_encoder_out, lq_imgs
+            del hq_pred_pose, lq_pred_pose, res_pred_pose
+            del hq_depth, lq_depth, res_depth
+            del res_imgs 
+            torch.cuda.empty_cache()
 
             
         elif cfg.MVRM_EVAL.eval_method == 'wo_mvrm_LQ':       
@@ -1376,6 +1416,8 @@ class DepthAnything3(nn.Module, PyTorchModelHubMixin):
             
         # Convert raw output to prediction
         prediction = self._convert_to_prediction(raw_output)
+        del raw_output  
+        torch.cuda.empty_cache()
 
         # Align prediction to extrinsincs
         prediction = self._align_to_input_extrinsics_intrinsics(

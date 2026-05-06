@@ -25,11 +25,8 @@ pip install --no-build-isolation --config-settings editable_mode=compat git+http
 
 ### 1. Training bash script
 ```bash
-# CUDA=0,1,2,3,4,5,6,7 (8대)
-bash run_scripts/train/JIHYE_run_train_multiview_VAE_ddt_lq2hq.sh
-
-# CUDA=0,1,2,3,4,5,6,7 (8대)
-bash run_scripts/train/JIHYE_run_train_multiview_VAE21_ddt_lq2hq.sh
+# CUDA=0,1,2,3,4,5,6,7
+bash run_scripts/train/JIHYE_run_train_multiview_flux_ddt_lq2hq.sh
 ```
 
-### 2. Training config yaml file : [MVR_DA3 (SD3.5)](run_configs/train/JIHYE_run_train_multiview_VAE_ddt_lq2hq.yaml) / [MVR_DA3 (SD2.1)](run_configs/train/JIHYE_run_train_multiview_VAE21_ddt_lq2hq.yaml)
+### 2. Training config yaml file : [MVR_DA3](run_configs/train/JIHYE_run_train_multiview_flux_ddt_lq2hq.yaml)

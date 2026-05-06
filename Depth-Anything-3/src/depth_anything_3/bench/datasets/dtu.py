@@ -39,11 +39,6 @@ from tqdm import tqdm
 from depth_anything_3.bench.dataset import Dataset
 from depth_anything_3.bench.registries import MONO_REGISTRY, MV_REGISTRY
 from depth_anything_3.utils.constants import (
-
-    # PHO
-    DA3_LQ_ROOT_PATH,
-    DA3_RES_ROOT_PATH,
-    
     DTU_DIST_THRESH,
     DTU_EVAL_DATA_ROOT,
     DTU_MAX_POINTS,
@@ -67,10 +62,6 @@ class DTU(Dataset):
     The dataset uses MVSNet evaluation protocol:
     https://drive.google.com/file/d/1rX0EXlUL4prRxrRu2DgLJv2j7-tpUD4D/view
     """
-
-    # PHO
-    da3_lq_root = os.path.join(DA3_LQ_ROOT_PATH, 'dtu')
-    da3_res_root = os.path.join(DA3_RES_ROOT_PATH, 'dtu')
 
     data_root = DTU_EVAL_DATA_ROOT
     SCENES = DTU_SCENES
@@ -120,27 +111,8 @@ class DTU(Dataset):
         # Reorder: place index 33 first (reference view convention)
         files = [files[33]] + files[:33] + files[34:]
 
-
-        # PHO (LQ)
-        lq_folder = os.path.join(self.da3_lq_root, "Rectified", scene)
-        lq_files = sorted(glob.glob(os.path.join(lq_folder, "*.jpg")))
-        # Reorder: place index 33 first (reference view convention)
-        lq_files = [lq_files[33]] + lq_files[:33] + lq_files[34:]
-        
-        
-        # PHO (RES)
-        res_folder = os.path.join(self.da3_res_root, "Rectified", scene)
-        res_files = sorted(glob.glob(os.path.join(res_folder, "*.png")))
-        # Reorder: place index 33 first (reference view convention)
-        res_files = [res_files[33]] + res_files[:33] + res_files[34:]
-        
-
         out = Dict(
             {
-                # PHO
-                "lq_image_files": lq_files,
-                "res_image_files": res_files,
-            
                 "image_files": files,
                 "extrinsics": [],
                 "intrinsics": [],
@@ -149,7 +121,6 @@ class DTU(Dataset):
         )
 
         for rgb_file in files:
-            
             basename = os.path.basename(rgb_file)
             file_idx = basename.split("_")[1]
             cam_idx = depth_idx = int(file_idx) - 1
@@ -161,7 +132,6 @@ class DTU(Dataset):
             out.extrinsics.append(ext)
             out.intrinsics.append(ixt)
             out.aux.mask_files.append(mask_file)
-            
 
         out.extrinsics = np.asarray(out.extrinsics, dtype=np.float32)
         out.intrinsics = np.asarray(out.intrinsics, dtype=np.float32)
@@ -214,34 +184,6 @@ class DTU(Dataset):
             masks.append(mask > 10)
         return np.asarray(masks)
 
-
-    def _load_gt_meta(self, result_path: str) -> Dict:
-        """
-        Load saved GT meta (extrinsics, intrinsics, image_files) for fusion.
-
-        This is needed when frames are sampled, so fuse3d uses the correct
-        (sampled) GT instead of full dataset GT.
-
-        Args:
-            result_path: Path to npz file (used to derive gt_meta.npz path)
-
-        Returns:
-            Dict with GT data, or None if gt_meta.npz doesn't exist
-        """
-        # gt_meta.npz is in the same exports/ directory as results.npz
-        export_dir = os.path.dirname(result_path)  # exports/mini_npz/
-        gt_meta_path = os.path.join(os.path.dirname(export_dir), "gt_meta.npz")
-
-        if os.path.exists(gt_meta_path):
-            data = np.load(gt_meta_path, allow_pickle=True)
-            return Dict({
-                "extrinsics": data["extrinsics"],
-                "intrinsics": data["intrinsics"],
-                "image_files": data["image_files"] if "image_files" in data else None,
-            })
-        return None
-    
-    
     def fuse3d(self, scene: str, result_path: str, fuse_path: str, mode: str) -> None:
         """
         Fuse per-view depths into a point cloud and save to PLY.
@@ -252,63 +194,9 @@ class DTU(Dataset):
             fuse_path: Output path for fused point cloud (.ply)
             mode: "recon_unposed" or "recon_posed"
         """
-        
-        # gt_data = self.get_data(scene)
-        
-        # # full gt data 
-        # full_gt_data = self.get_data(scene)
-
-        # # PHO        
-        # gt_meta = self._load_gt_meta(result_path)
-        # if gt_meta is not None:
-        #     gt_data = gt_meta
-        #     # Need to rebuild aux from full GT data based on image indices
-        #     image_indices = [
-        #         full_gt_data.image_files.index(f)
-        #         for f in gt_data.image_files
-        #         if f in full_gt_data.image_files
-        #     ]
-        #     gt_data.aux.mask_files = [full_gt_data.aux.mask_files[i] for i in image_indices]
-        # else:
-        #     gt_data = full_gt_data
-        #     image_indices = list(range(len(full_gt_data.image_files)))
-            
-        # pred_data = Dict({k: v for k, v in np.load(result_path).items()})
-        # masks = self.load_masks(gt_data.aux.mask_files)
-
-
-        full_gt_data = self.get_data(scene)
-
-        gt_meta = self._load_gt_meta(result_path)
-
-        if gt_meta is not None:
-            gt_data = gt_meta
-
-            # Build fast lookup dictionary
-            full_index_map = {
-                f: i for i, f in enumerate(full_gt_data.image_files)
-            }
-
-            # Ensure all sampled images exist
-            image_indices = []
-            for f in gt_data.image_files:
-                if f not in full_index_map:
-                    raise ValueError(f"Image {f} not found in full GT data")
-                image_indices.append(full_index_map[f])
-
-            # Rebuild mask files
-            gt_data.aux.mask_files = [
-                full_gt_data.aux.mask_files[i]
-                for i in image_indices
-            ]
-
-        else:
-            gt_data = full_gt_data
-            image_indices = list(range(len(full_gt_data.image_files)))
-
+        gt_data = self.get_data(scene)
         pred_data = Dict({k: v for k, v in np.load(result_path).items()})
         masks = self.load_masks(gt_data.aux.mask_files)
-
 
         if mode == "recon_unposed":
             depths, intrinsics, extrinsics = self._prep_unposed(pred_data, gt_data, masks)
@@ -562,29 +450,6 @@ class DTU(Dataset):
         # Compute accuracy (pred -> GT) and completeness (GT -> pred)
         stl = self._read_ply(gt_ply) if isinstance(gt_ply, str) else gt_ply
 
-
-
-        # print("Total pred points:", data_pcd.shape[0])
-        # print("After downsample:", data_down.shape[0])
-        # print("After BB filter:", data_in.shape[0])
-        # print("After grid inbound:", data_grid_in.shape[0])
-        # print("After ObsMask:", data_in_obs.shape[0])
-        # print("GT points:", stl.shape[0])
-        
-
-        # PHO
-        # If no observed predicted points → invalid reconstruction
-        if data_in_obs.shape[0] == 0:
-            print(f"[WARNING] {scanid}: No points inside ObsMask. Skipping.")
-            return np.nan, np.nan, np.nan
-
-        # PHO
-        # Also guard completeness side
-        if data_in.shape[0] == 0:
-            print(f"[WARNING] {scanid}: No points inside BB. Skipping.")
-            return np.nan, np.nan, np.nan
-
-
         if use_gpu and torch.cuda.is_available():
             # GPU-accelerated distance computation
             mean_d2s = self._knn_dist_gpu(data_in_obs, stl, max_dist)
@@ -813,3 +678,4 @@ class DTU(Dataset):
         rng = np.random.default_rng(seed=42)
         random_idx = rng.choice(len(points), max_points, replace=False)
         return points[random_idx]
+
